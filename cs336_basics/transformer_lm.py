@@ -2,6 +2,8 @@ import torch
 import numpy as np
 
 from einops import einsum, reduce
+from jaxtyping import Float
+from torch import Tensor
 
 class Linear(torch.nn.Module):
     def __init__(self, in_features, out_features, device=None, dtype=None):
@@ -39,3 +41,17 @@ class RMSNorm(torch.nn.Module):
         rms_x = torch.sqrt(reduce(x**2, "... d_model -> ... 1", "mean") + self.eps)
         result = x * self.weights / rms_x
         return result.to(in_dtype)
+    
+def run_swiglu(
+    d_model: int,
+    d_ff: int,
+    w1_weight: Float[Tensor, " d_ff d_model"],
+    w2_weight: Float[Tensor, " d_model d_ff"],
+    w3_weight: Float[Tensor, " d_ff d_model"],
+    in_features: Float[Tensor, " ... d_model"],
+) -> Float[Tensor, " ... d_model"]:
+    w1_x = einsum(w1_weight, in_features, "d_ff d_model, ... d_model -> ... d_ff")
+    silu = w1_x * torch.sigmoid(w1_x)
+
+    w3_x = einsum(w3_weight, in_features, "d_ff d_model, ... d_model -> ... d_ff")
+    return einsum(w2_weight, silu * w3_x, "d_model d_ff, ... d_ff -> ... d_model")
