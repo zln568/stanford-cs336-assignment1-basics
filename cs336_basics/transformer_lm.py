@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 
-from einops import einsum, reduce
+from einops import einsum, reduce, rearrange
 from jaxtyping import Float
 from torch import Tensor
 
@@ -55,3 +55,28 @@ def run_swiglu(
 
     w3_x = einsum(w3_weight, in_features, "d_ff d_model, ... d_model -> ... d_ff")
     return einsum(w2_weight, silu * w3_x, "d_model d_ff, ... d_ff -> ... d_model")
+
+class RotaryPositionalEmbedding(torch.nn.Module):
+    def __init__(self, theta: float, d_k: int, max_seq_len: int, device=None):
+        super().__init__()
+
+        i = torch.arange(max_seq_len, device=device).unsqueeze(1)
+        pow = torch.arange(0, d_k, 2, device=device) / d_k
+        angles = i / (theta**pow)
+
+        self.register_buffer("cos", angles.cos(), persistent=False)
+        self.register_buffer("sin", angles.sin(), persistent=False)
+
+    def forward(self, x: torch.Tensor, token_positions: torch.Tensor) -> torch.Tensor:
+        cos = self.cos[token_positions]
+        sin = self.sin[token_positions]
+
+        x_even = x[..., 0::2]
+        x_odd = x[..., 1::2]
+
+        x_even_rot = cos * x_even - sin * x_odd
+        x_odd_rot = sin * x_even + cos * x_odd
+
+        x_rot = rearrange([x_even_rot, x_odd_rot], "two ... -> ... two")
+        result = rearrange(x_rot, "... d1 d2 -> ... (d1 d2)")
+        return result
