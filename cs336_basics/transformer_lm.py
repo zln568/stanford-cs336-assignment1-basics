@@ -80,3 +80,8 @@ class RotaryPositionalEmbedding(torch.nn.Module):
         x_rot = rearrange([x_even_rot, x_odd_rot], "two ... -> ... two")
         result = rearrange(x_rot, "... d1 d2 -> ... (d1 d2)")
         return result
+    
+def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, " ..."]:
+    max = in_features.amax(dim=dim, keepdim=True)
+    x_exp = torch.exp(in_features - max)
+    return x_exp / x_exp.sum(dim=dim, keepdim=True)
