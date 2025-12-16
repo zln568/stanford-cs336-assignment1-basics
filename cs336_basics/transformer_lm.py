@@ -2,7 +2,7 @@ import torch
 import numpy as np
 
 from einops import einsum, reduce, rearrange
-from jaxtyping import Float
+from jaxtyping import Float, Bool
 from torch import Tensor
 
 class Linear(torch.nn.Module):
@@ -85,3 +85,16 @@ def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, "
     max = in_features.amax(dim=dim, keepdim=True)
     x_exp = torch.exp(in_features - max)
     return x_exp / x_exp.sum(dim=dim, keepdim=True)
+
+def run_scaled_dot_product_attention(
+    Q: Float[Tensor, " ... queries d_k"],
+    K: Float[Tensor, " ... keys d_k"],
+    V: Float[Tensor, " ... values d_v"],
+    mask: Bool[Tensor, " ... queries keys"] | None = None,
+) -> Float[Tensor, " ... queries d_v"]:
+    d_k = Q.shape[-1]
+    pre_softmax_value = einsum(Q, K, "... queries d_k, ... keys d_k -> ... queries keys") / np.sqrt(d_k)
+    if mask is not None:
+        pre_softmax_value = torch.where(mask == True, pre_softmax_value, -torch.inf)
+    
+    return einsum(run_softmax(pre_softmax_value, -1), V, "... queries values, ... values d_v -> ... queries d_v")
