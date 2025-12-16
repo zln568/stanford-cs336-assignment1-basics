@@ -2,7 +2,7 @@ import torch
 import numpy as np
 
 from einops import einsum, reduce, rearrange
-from jaxtyping import Float, Bool
+from jaxtyping import Float, Bool, Int
 from torch import Tensor
 
 class Linear(torch.nn.Module):
@@ -98,3 +98,36 @@ def run_scaled_dot_product_attention(
         pre_softmax_value = torch.where(mask == True, pre_softmax_value, -torch.inf)
     
     return einsum(run_softmax(pre_softmax_value, -1), V, "... queries values, ... values d_v -> ... queries d_v")
+
+class CausalMultiheadSelfAttention(torch.nn.Module):
+    def __init__(self, d_model: int, num_heads: int, device=None, dtype=None):
+        super().__init__()
+        self.q_proj = Linear(d_model, d_model, device, dtype)
+        self.k_proj = Linear(d_model, d_model, device, dtype)
+        self.v_proj = Linear(d_model, d_model, device, dtype)
+        self.o_proj = Linear(d_model, d_model, device, dtype)
+
+        self.num_heads = num_heads
+
+    def forward(self, 
+                in_features: Float[Tensor, " ... sequence_length d_in"],
+                rope: RotaryPositionalEmbedding | None = None,
+                token_positions: Int[Tensor, " ... sequence_length"] | None = None):
+        q = self.q_proj.forward(in_features)
+        k = self.k_proj.forward(in_features)
+        v = self.v_proj.forward(in_features)
+
+        q = rearrange(q, "... s (h d) -> ... h s d", h=self.num_heads)
+        k = rearrange(k, "... s (h d) -> ... h s d", h=self.num_heads)
+        v = rearrange(v, "... s (h d) -> ... h s d", h=self.num_heads)
+
+        if rope is not None:
+            q = rope.forward(q, token_positions)
+            k = rope.forward(k, token_positions)
+
+        mask = ~torch.triu(torch.full((q.shape[-2], k.shape[-2]), True, device=in_features.device), diagonal=1)
+
+        multihead = run_scaled_dot_product_attention(q, k, v, mask)
+        multihead = rearrange(multihead, "... h s d -> ... s (h d)")
+
+        return self.o_proj(multihead)
