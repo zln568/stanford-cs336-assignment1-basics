@@ -88,7 +88,12 @@ def run_swiglu(
     # swiglu.w1.weight.data = w1_weight
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
-    return cs336_basics.transformer_lm.run_swiglu(d_model, d_ff, w1_weight, w2_weight, w3_weight, in_features)
+    swiglu = cs336_basics.transformer_lm.SwiGLU(d_model, d_ff)
+    swiglu.w1.weights.data = w1_weight
+    swiglu.w2.weights.data = w2_weight
+    swiglu.w3.weights.data = w3_weight
+    
+    return swiglu(in_features)
 
 
 def run_scaled_dot_product_attention(
@@ -291,7 +296,24 @@ def run_transformer_block(
         Float[Tensor, "batch sequence_length d_model"] Tensor with the output of
         running the Transformer block on the input features while using RoPE.
     """
-    raise NotImplementedError
+
+    rope = cs336_basics.transformer_lm.RotaryPositionalEmbedding(theta, d_model/num_heads, max_seq_len)
+    block = cs336_basics.transformer_lm.PreNormTransformerBlock(d_model, num_heads, d_ff, rope)
+
+    block.ln1.weights.data = weights["ln1.weight"]
+
+    block.attn.q_proj.weights.data = weights["attn.q_proj.weight"]
+    block.attn.k_proj.weights.data = weights["attn.k_proj.weight"]
+    block.attn.v_proj.weights.data = weights["attn.v_proj.weight"]
+    block.attn.o_proj.weights.data = weights["attn.output_proj.weight"]
+
+    block.ln2.weights.data = weights["ln2.weight"]
+
+    block.ffn.w1.weights.data = weights["ffn.w1.weight"]
+    block.ffn.w2.weights.data = weights["ffn.w2.weight"]
+    block.ffn.w3.weights.data = weights["ffn.w3.weight"]
+    
+    return block(in_features)
 
 
 def run_transformer_lm(

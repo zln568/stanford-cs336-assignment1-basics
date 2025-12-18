@@ -41,20 +41,21 @@ class RMSNorm(torch.nn.Module):
         rms_x = torch.sqrt(reduce(x**2, "... d_model -> ... 1", "mean") + self.eps)
         result = x * self.weights / rms_x
         return result.to(in_dtype)
-    
-def run_swiglu(
-    d_model: int,
-    d_ff: int,
-    w1_weight: Float[Tensor, " d_ff d_model"],
-    w2_weight: Float[Tensor, " d_model d_ff"],
-    w3_weight: Float[Tensor, " d_ff d_model"],
-    in_features: Float[Tensor, " ... d_model"],
-) -> Float[Tensor, " ... d_model"]:
-    w1_x = einsum(w1_weight, in_features, "d_ff d_model, ... d_model -> ... d_ff")
-    silu = w1_x * torch.sigmoid(w1_x)
 
-    w3_x = einsum(w3_weight, in_features, "d_ff d_model, ... d_model -> ... d_ff")
-    return einsum(w2_weight, silu * w3_x, "d_model d_ff, ... d_ff -> ... d_model")
+class SwiGLU(torch.nn.Module):
+    def __init__(self, d_model: int, d_ff: int, device=None, dtype=None):
+        super().__init__()
+
+        self.w1 = Linear(d_model, d_ff)
+        self.w2 = Linear(d_ff, d_model)
+        self.w3 = Linear(d_model, d_ff)
+
+    def forward(self, in_features: Float[Tensor, " ... d_model"]):
+        w1_x = self.w1(in_features)
+        silu = w1_x * torch.sigmoid(w1_x)
+
+        w3_x = self.w3(in_features)
+        return self.w2(silu * w3_x)
 
 class RotaryPositionalEmbedding(torch.nn.Module):
     def __init__(self, theta: float, d_k: int, max_seq_len: int, device=None):
@@ -121,13 +122,34 @@ class CausalMultiheadSelfAttention(torch.nn.Module):
         k = rearrange(k, "... s (h d) -> ... h s d", h=self.num_heads)
         v = rearrange(v, "... s (h d) -> ... h s d", h=self.num_heads)
 
+        d_q = q.shape[-2]
+        d_k = k.shape[-2]
         if rope is not None:
+            if token_positions is None:
+                token_positions = torch.arange(d_q)
             q = rope.forward(q, token_positions)
             k = rope.forward(k, token_positions)
 
-        mask = ~torch.triu(torch.full((q.shape[-2], k.shape[-2]), True, device=in_features.device), diagonal=1)
+        mask = ~torch.triu(torch.full((d_q, d_k), True, device=in_features.device), diagonal=1)
 
         multihead = run_scaled_dot_product_attention(q, k, v, mask)
         multihead = rearrange(multihead, "... h s d -> ... s (h d)")
 
         return self.o_proj(multihead)
+    
+class PreNormTransformerBlock(torch.nn.Module):
+    def __init__(self, d_model: int, num_heads: int, d_ff: int, rope: RotaryPositionalEmbedding | None = None, device=None, dtype=None):
+        super().__init__()
+
+        self.rope = rope
+
+        self.ln1 = RMSNorm(d_model, device=device, dtype=dtype)
+        self.attn = CausalMultiheadSelfAttention(d_model, num_heads, device, dtype)
+
+        self.ln2 = RMSNorm(d_model, device=device, dtype=dtype)
+        self.ffn = SwiGLU(d_model, d_ff)
+
+    def forward(self, in_features: Float[Tensor, " ... sequence_length d_in"]):
+        result = in_features + self.attn(self.ln1(in_features), self.rope)
+        result = result + self.ffn(self.ln2(result))
+        return result
