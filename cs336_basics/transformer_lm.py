@@ -46,9 +46,9 @@ class SwiGLU(torch.nn.Module):
     def __init__(self, d_model: int, d_ff: int, device=None, dtype=None):
         super().__init__()
 
-        self.w1 = Linear(d_model, d_ff)
-        self.w2 = Linear(d_ff, d_model)
-        self.w3 = Linear(d_model, d_ff)
+        self.w1 = Linear(d_model, d_ff, device, dtype)
+        self.w2 = Linear(d_ff, d_model, device, dtype)
+        self.w3 = Linear(d_model, d_ff, device, dtype)
 
     def forward(self, in_features: Float[Tensor, " ... d_model"]):
         w1_x = self.w1(in_features)
@@ -126,7 +126,7 @@ class CausalMultiheadSelfAttention(torch.nn.Module):
         d_k = k.shape[-2]
         if rope is not None:
             if token_positions is None:
-                token_positions = torch.arange(d_q)
+                token_positions = torch.arange(d_q, device=in_features.device)
             q = rope.forward(q, token_positions)
             k = rope.forward(k, token_positions)
 
@@ -147,7 +147,7 @@ class PreNormTransformerBlock(torch.nn.Module):
         self.attn = CausalMultiheadSelfAttention(d_model, num_heads, device, dtype)
 
         self.ln2 = RMSNorm(d_model, device=device, dtype=dtype)
-        self.ffn = SwiGLU(d_model, d_ff)
+        self.ffn = SwiGLU(d_model, d_ff, device, dtype)
 
     def forward(self, in_features: Float[Tensor, " ... sequence_length d_in"]):
         result = in_features + self.attn(self.ln1(in_features), self.rope)
