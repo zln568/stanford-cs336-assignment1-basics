@@ -32,7 +32,7 @@ def run_linear(
         Float[Tensor, "... d_out"]: The transformed output of your linear module.
     """
     linear = cs336_basics.transformer_lm.Linear(d_in, d_out)
-    linear.weights.data = weights
+    linear.weight.data = weights
     return linear.forward(in_features)
 
 
@@ -55,7 +55,7 @@ def run_embedding(
         Float[Tensor, "... d_model"]: Batch of embeddings returned by your Embedding layer.
     """
     embedding = cs336_basics.transformer_lm.Embedding(vocab_size, d_model)
-    embedding.weights.data = weights
+    embedding.weight.data = weights
     return embedding.forward(token_ids) 
 
 
@@ -89,9 +89,9 @@ def run_swiglu(
     # swiglu.w2.weight.data = w2_weight
     # swiglu.w3.weight.data = w3_weight
     swiglu = cs336_basics.transformer_lm.SwiGLU(d_model, d_ff)
-    swiglu.w1.weights.data = w1_weight
-    swiglu.w2.weights.data = w2_weight
-    swiglu.w3.weights.data = w3_weight
+    swiglu.w1.weight.data = w1_weight
+    swiglu.w2.weight.data = w2_weight
+    swiglu.w3.weight.data = w3_weight
     
     return swiglu(in_features)
 
@@ -149,10 +149,10 @@ def run_multihead_self_attention(
         implementation with the given QKV projection weights and input features.
     """
     attention = cs336_basics.transformer_lm.CausalMultiheadSelfAttention(d_model, num_heads)
-    attention.q_proj.weights.data = q_proj_weight
-    attention.k_proj.weights.data = k_proj_weight
-    attention.v_proj.weights.data = v_proj_weight
-    attention.o_proj.weights.data = o_proj_weight
+    attention.q_proj.weight.data = q_proj_weight
+    attention.k_proj.weight.data = k_proj_weight
+    attention.v_proj.weight.data = v_proj_weight
+    attention.output_proj.weight.data = o_proj_weight
     return attention.forward(in_features)
 
 
@@ -194,10 +194,10 @@ def run_multihead_self_attention_with_rope(
         implementation with the given QKV projection weights and input features.
     """
     attention = cs336_basics.transformer_lm.CausalMultiheadSelfAttention(d_model, num_heads)
-    attention.q_proj.weights.data = q_proj_weight
-    attention.k_proj.weights.data = k_proj_weight
-    attention.v_proj.weights.data = v_proj_weight
-    attention.o_proj.weights.data = o_proj_weight
+    attention.q_proj.weight.data = q_proj_weight
+    attention.k_proj.weight.data = k_proj_weight
+    attention.v_proj.weight.data = v_proj_weight
+    attention.output_proj.weight.data = o_proj_weight
 
     rope = cs336_basics.transformer_lm.RotaryPositionalEmbedding(theta, d_model/num_heads, max_seq_len)
     return attention.forward(in_features, rope, token_positions)
@@ -299,19 +299,7 @@ def run_transformer_block(
 
     rope = cs336_basics.transformer_lm.RotaryPositionalEmbedding(theta, d_model/num_heads, max_seq_len)
     block = cs336_basics.transformer_lm.PreNormTransformerBlock(d_model, num_heads, d_ff, rope)
-
-    block.ln1.weights.data = weights["ln1.weight"]
-
-    block.attn.q_proj.weights.data = weights["attn.q_proj.weight"]
-    block.attn.k_proj.weights.data = weights["attn.k_proj.weight"]
-    block.attn.v_proj.weights.data = weights["attn.v_proj.weight"]
-    block.attn.o_proj.weights.data = weights["attn.output_proj.weight"]
-
-    block.ln2.weights.data = weights["ln2.weight"]
-
-    block.ffn.w1.weights.data = weights["ffn.w1.weight"]
-    block.ffn.w2.weights.data = weights["ffn.w2.weight"]
-    block.ffn.w3.weights.data = weights["ffn.w3.weight"]
+    block.load_state_dict(weights)
     
     return block(in_features)
 
@@ -395,7 +383,16 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    lm =  cs336_basics.transformer_lm.TransformerLM(d_model,
+                                                    num_heads,
+                                                    d_ff, 
+                                                    vocab_size,
+                                                    context_length, 
+                                                    num_layers,
+                                                    rope_theta)
+    
+    lm.load_state_dict(weights)
+    return lm(in_indices)
 
 
 def run_rmsnorm(
@@ -419,7 +416,7 @@ def run_rmsnorm(
         RMSNorm of the `in_features`.
     """
     rmsnorm = cs336_basics.transformer_lm.RMSNorm(d_model, eps)
-    rmsnorm.weights.data = weights
+    rmsnorm.weight.data = weights
     return rmsnorm.forward(in_features)
 
 

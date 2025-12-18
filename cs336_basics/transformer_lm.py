@@ -10,21 +10,21 @@ class Linear(torch.nn.Module):
         super().__init__()
 
         std = np.sqrt(2/(in_features+out_features))
-        self.weights = torch.nn.Parameter(torch.nn.init.trunc_normal_(
+        self.weight = torch.nn.Parameter(torch.nn.init.trunc_normal_(
             torch.empty(out_features, in_features, device=device, dtype=dtype), std=std, a=-3*std, b=3*std))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return einsum(self.weights, x, "d_out d_in, ... d_in -> ... d_out")
+        return einsum(self.weight, x, "d_out d_in, ... d_in -> ... d_out")
     
 class Embedding(torch.nn.Module):
     def __init__(self, num_embeddings, embedding_dim, device=None, dtype=None):
         super().__init__()
 
-        self.weights = torch.nn.Parameter(torch.nn.init.trunc_normal_(
+        self.weight = torch.nn.Parameter(torch.nn.init.trunc_normal_(
             torch.empty(num_embeddings, embedding_dim, device=device, dtype=dtype), std=1, a=-3, b=3))
 
     def forward(self, token_ids: torch.Tensor) -> torch.Tensor:
-        return self.weights[token_ids]
+        return self.weight[token_ids]
     
 class RMSNorm(torch.nn.Module):
     def __init__(self, d_model: int, eps: float = 1e-5, device=None, dtype=None):
@@ -32,14 +32,14 @@ class RMSNorm(torch.nn.Module):
 
         self.d_model = d_model
         self.eps = eps
-        self.weights = torch.nn.Parameter(torch.ones(d_model, device=device, dtype=dtype))
+        self.weight = torch.nn.Parameter(torch.ones(d_model, device=device, dtype=dtype))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         in_dtype = x.dtype
         x = x.to(torch.float32)
         
         rms_x = torch.sqrt(reduce(x**2, "... d_model -> ... 1", "mean") + self.eps)
-        result = x * self.weights / rms_x
+        result = x * self.weight / rms_x
         return result.to(in_dtype)
 
 class SwiGLU(torch.nn.Module):
@@ -106,7 +106,7 @@ class CausalMultiheadSelfAttention(torch.nn.Module):
         self.q_proj = Linear(d_model, d_model, device, dtype)
         self.k_proj = Linear(d_model, d_model, device, dtype)
         self.v_proj = Linear(d_model, d_model, device, dtype)
-        self.o_proj = Linear(d_model, d_model, device, dtype)
+        self.output_proj = Linear(d_model, d_model, device, dtype)
 
         self.num_heads = num_heads
 
@@ -135,7 +135,7 @@ class CausalMultiheadSelfAttention(torch.nn.Module):
         multihead = run_scaled_dot_product_attention(q, k, v, mask)
         multihead = rearrange(multihead, "... h s d -> ... s (h d)")
 
-        return self.o_proj(multihead)
+        return self.output_proj(multihead)
     
 class PreNormTransformerBlock(torch.nn.Module):
     def __init__(self, d_model: int, num_heads: int, d_ff: int, rope: RotaryPositionalEmbedding | None = None, device=None, dtype=None):
@@ -153,3 +153,34 @@ class PreNormTransformerBlock(torch.nn.Module):
         result = in_features + self.attn(self.ln1(in_features), self.rope)
         result = result + self.ffn(self.ln2(result))
         return result
+    
+class TransformerLM(torch.nn.Module):
+    def __init__(self, 
+                 d_model: int, 
+                 num_heads: int, 
+                 d_ff: int, 
+                 vocab_size: int, 
+                 context_length: int, 
+                 num_layers: int,
+                 rope_theta: float,
+                 device=None, 
+                 dtype=None):
+        super().__init__()
+
+        self.token_embeddings = Embedding(vocab_size, d_model, device, dtype)
+
+        self.rope = RotaryPositionalEmbedding(rope_theta, d_model/num_heads, context_length, device)
+        self.layers = torch.nn.ModuleList(
+            [PreNormTransformerBlock(d_model, num_heads, d_ff, self.rope, device, dtype) for _ in range(num_layers)]
+        )
+
+        self.ln_final = RMSNorm(d_model, device=device, dtype=dtype)
+        self.lm_head = Linear(d_model, vocab_size, device, dtype)
+    
+    def forward(self, in_features: Float[Tensor, " ... sequence_length d_in"]):
+        x = self.token_embeddings(in_features)
+        for layer in self.layers:
+            x = layer(x)
+
+        x = self.lm_head(self.ln_final(x))
+        return x
