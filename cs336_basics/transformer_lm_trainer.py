@@ -73,3 +73,14 @@ def get_lr_cosine_schedule(
         return min_learning_rate + 0.5 * (1 + math.cos((it-warmup_iters)*math.pi / (cosine_cycle_iters-warmup_iters))) * (max_learning_rate - min_learning_rate)
     else:
         return min_learning_rate
+    
+def gradient_clipping(parameters: Iterable[torch.nn.Parameter], max_l2_norm: float, eps=1e-6) -> None:
+    grads = [p.grad for p in parameters if p.grad is not None]
+    if grads:
+        stacked_grads = torch.stack([g.detach().norm() for g in grads])
+        total_norm = stacked_grads.norm()
+        
+        if total_norm >= max_l2_norm:
+            scale = max_l2_norm / (total_norm + eps)
+            for grad in grads:
+                grad.detach().mul_(scale)
