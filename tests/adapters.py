@@ -12,6 +12,7 @@ import cs336_basics.bpe_trainer
 import cs336_basics.bpe_tokenizer
 import cs336_basics.transformer_lm
 import cs336_basics.transformer_lm_trainer
+import cs336_basics.training_loop
 
 
 def run_linear(
@@ -455,7 +456,7 @@ def run_get_batch(
         is the sampled input sequences, and the second tuple item is the corresponding
         language modeling labels.
     """
-    raise NotImplementedError
+    return cs336_basics.training_loop.get_batch(dataset, batch_size, context_length, device)
 
 
 def run_softmax(in_features: Float[Tensor, " ..."], dim: int) -> Float[Tensor, " ..."]:
